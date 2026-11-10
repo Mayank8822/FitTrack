@@ -1,0 +1,20 @@
+{
+  "realm": "fitness-oauth2",
+  "enabled": true,
+  "displayName": "SmartFit",
+  "registrationAllowed": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "clients": [{
+    "clientId": "oauth2-pkce-client",
+    "name": "SmartFit React SPA",
+    "enabled": true,
+    "publicClient": true,
+    "standardFlowEnabled": true,
+    "directAccessGrantsEnabled": false,
+    "redirectUris": ["http://localhost:5173/*", "http://localhost:3000/*"],
+    "webOrigins": ["http://localhost:5173", "http://localhost:3000"],
+    "attributes": {"pkce.code.challenge.method": "S256"}
+  }]
+}

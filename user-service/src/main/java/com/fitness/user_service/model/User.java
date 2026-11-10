@@ -1,0 +1,48 @@
+package com.fitness.user_service.model;
+
+import jakarta.persistence.*;
+import lombok.Data;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+
+import java.time.LocalDateTime;
+
+@Entity
+@Table(name = "users")
+@Data
+public class User {
+    @Id
+    @GeneratedValue(strategy = GenerationType.UUID)
+    private String id;
+
+    @Column(unique = true, nullable = false)
+    private String email;
+
+    private String keycloakId;
+
+    // Keycloak owns credentials. Nullable legacy column retained for schema compatibility.
+    @Column(nullable = true)
+    private String password;
+    private Integer age;
+    private Double heightCm;
+    private Double weightKg;
+    private String fitnessLevel = "BEGINNER";
+    private String fitnessGoal = "GENERAL_FITNESS";
+    private Integer dailyStepGoal = 8000;
+    private Integer dailyCalorieGoal = 2000;
+    private Boolean profilePublic = false;
+    private Boolean shareActivities = false;
+    private Boolean showWeight = false;
+    private Boolean showCalories = false;
+    private String firstName;
+    private String lastName;
+
+    @Enumerated(EnumType.STRING)
+    private UserRole role = UserRole.USER;
+
+    @CreationTimestamp
+    private LocalDateTime createdAt;
+
+    @UpdateTimestamp
+    private LocalDateTime updatedAt;
+}

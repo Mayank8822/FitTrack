@@ -1,0 +1,175 @@
+name: smartfit
+services:
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: fitness_user_db
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_local_only}
+    volumes: [postgres_data:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27018:27017"
+    volumes: [mongo_data:/data/db]
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports: ["5672:5672", "15672:15672"]
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.2
+    command: ["start-dev", "--http-port=8080", "--import-realm"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-admin_change_me}
+    ports: ["8181:8080"]
+    volumes: ["./infrastructure/keycloak/realm-import:/opt/keycloak/data/import:ro"]
+
+  eureka:
+    build: ./eureka
+    ports: ["8761:8761"]
+    restart: on-failure
+    environment:
+      SERVER_PORT: "8761"
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx256m"
+
+  config-server:
+    build: ./configServer
+    ports: ["8888:8888"]
+    restart: on-failure
+    depends_on: [eureka]
+    environment:
+      SERVER_PORT: "8888"
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx256m"
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_local_only}
+      POSTGRES_HOST: postgres
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:8761/eureka/
+      EUREKA_URL: http://eureka:8761/eureka/
+      SPRING_RABBITMQ_HOST: rabbitmq
+      RABBITMQ_HOST: rabbitmq
+      SPRING_MONGODB_URI: mongodb://mongodb:27017
+
+  user-service:
+    build: ./user-service
+    restart: on-failure
+    depends_on:
+      postgres: { condition: service_healthy }
+      eureka: { condition: service_started }
+      config-server: { condition: service_started }
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx256m"
+      POSTGRES_HOST: postgres
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me_local_only}
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:8761/eureka/
+      EUREKA_URL: http://eureka:8761/eureka/
+      SPRING_CONFIG_IMPORT: optional:configserver:http://config-server:8888
+
+  activity-service:
+    build: ./activity-service
+    restart: on-failure
+    depends_on:
+      mongodb: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      eureka: { condition: service_started }
+      config-server: { condition: service_started }
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx256m"
+      SPRING_MONGODB_URI: mongodb://mongodb:27017/fitness_activity
+      MONGODB_URI: mongodb://mongodb:27017/fitness_activity
+      SPRING_RABBITMQ_HOST: rabbitmq
+      RABBITMQ_HOST: rabbitmq
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:8761/eureka/
+      EUREKA_URL: http://eureka:8761/eureka/
+      SPRING_CONFIG_IMPORT: optional:configserver:http://config-server:8888
+
+  ai-service:
+    build: ./ai-service
+    restart: on-failure
+    depends_on:
+      mongodb: { condition: service_healthy }
+      rabbitmq: { condition: service_healthy }
+      eureka: { condition: service_started }
+      config-server: { condition: service_started }
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx256m"
+      SPRING_MONGODB_URI: mongodb://mongodb:27017/fitness_recommendation
+      AI_MONGODB_URI: mongodb://mongodb:27017/fitness_recommendation
+      SPRING_RABBITMQ_HOST: rabbitmq
+      RABBITMQ_HOST: rabbitmq
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:8761/eureka/
+      EUREKA_URL: http://eureka:8761/eureka/
+      SPRING_CONFIG_IMPORT: optional:configserver:http://config-server:8888
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_API_URL: ${GEMINI_API_URL:-}
+
+  community-service:
+    build: ./community-service
+    restart: on-failure
+    depends_on:
+      mongodb: { condition: service_healthy }
+      eureka: { condition: service_started }
+      config-server: { condition: service_started }
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx256m"
+      SPRING_MONGODB_URI: mongodb://mongodb:27017/fitness_community
+      COMMUNITY_MONGODB_URI: mongodb://mongodb:27017/fitness_community
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:8761/eureka/
+      EUREKA_URL: http://eureka:8761/eureka/
+      SPRING_CONFIG_IMPORT: optional:configserver:http://config-server:8888
+
+  ml-service:
+    build: ./ml-service
+    ports: ["8090:8090"]
+    restart: on-failure
+    environment:
+      ML_TRAINING_TOKEN: ${ML_TRAINING_TOKEN:-}
+    volumes: ["./ml-service/app:/app/app", "ml_models:/app/app/models"]
+
+  gateway:
+    build: ./gateway
+    restart: on-failure
+    depends_on: [eureka, config-server, keycloak, user-service, activity-service, ai-service, community-service, ml-service]
+    ports: ["8080:8080"]
+    environment:
+      JAVA_TOOL_OPTIONS: "-Xms128m -Xmx256m"
+      EUREKA_CLIENT_SERVICEURL_DEFAULTZONE: http://eureka:8761/eureka/
+      EUREKA_URL: http://eureka:8761/eureka/
+      SPRING_CONFIG_IMPORT: optional:configserver:http://config-server:8888
+      KEYCLOAK_JWK_URI: http://keycloak:8080/realms/fitness-oauth2/protocol/openid-connect/certs
+      ML_SERVICE_URL: http://ml-service:8090
+
+  frontend:
+    build:
+      context: ./fitness-app-frontend
+      args:
+        VITE_KEYCLOAK_URL: http://localhost:8181
+        VITE_REDIRECT_URI: http://localhost:3000
+        VITE_API_BASE_URL: http://localhost:8080/api
+    ports: ["3000:80"]
+    depends_on: [gateway]
+
+volumes:
+  postgres_data:
+  mongo_data:
+  ml_models:
